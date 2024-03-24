@@ -26,7 +26,6 @@ class TREEKPTSDataset(Dataset):
         img_size=(720, 1280),
         preproc=None,
         cache=False,
-        human_pose=True,
         num_kpts=5,
         default_flip_index=True
     ):
@@ -56,7 +55,6 @@ class TREEKPTSDataset(Dataset):
         self.name = name
         self.img_size = img_size
         self.preproc = preproc
-        self.human_pose = human_pose
         self.annotations, self.ids = self._load_coco_annotations()
 
         # when you horizontally flip the image, the keypoint labels need to be modified
@@ -76,12 +74,12 @@ class TREEKPTSDataset(Dataset):
         annotations = [self.load_anno_from_ids(_ids) for _ids in self.ids if self.load_anno_from_ids(_ids) is not None]
         ids = [ _ids for _ids in self.ids if self.load_anno_from_ids(_ids) is not None]
         return annotations, ids
+
     def _cache_images(self):
         logger.warning(
             "\n********************************************************************************\n"
             "You are using cached images in RAM to accelerate training.\n"
             "This requires large system RAM.\n"
-            "Make sure you have 200G+ RAM and 136G available disk space for training COCO.\n"
             "********************************************************************************\n"
         )
         max_h = self.img_size[0]
@@ -133,37 +131,31 @@ class TREEKPTSDataset(Dataset):
         for obj in annotations:
             x1 = np.max((0, obj["bbox"][0]))
             y1 = np.max((0, obj["bbox"][1]))
+
+            # convert from [xywh] to [xyxy] notation
             x2 = np.min((width, x1 + np.max((0, obj["bbox"][2]))))
             y2 = np.min((height, y1 + np.max((0, obj["bbox"][3]))))
             if obj["area"] > 0 and x2 >= x1 and y2 >= y1 and obj['num_keypoints']>0:
                 obj["clean_bbox"] = [x1, y1, x2, y2]
-                # assert np.all(0 <= np.array(obj['keypoints'][0::3])), print(np.array(obj['keypoints'][0::3]))
-                # assert np.all(np.array(obj['keypoints'][0::3]) <= width), print(np.array(obj['keypoints'][0::3]))
-                # assert np.all(0 <= np.array(obj['keypoints'][1::3])), print(np.array(obj['keypoints'][1::3]))
-                # assert np.all(np.array(obj['keypoints'][1::3]) <= height), print(np.array(obj['keypoints'][1::3]))
                 obj["clean_kpts"] =  obj['keypoints']
                 objs.append(obj)
         num_objs = len(objs)
         if num_objs==0:
             return
-        if self.human_pose: # here human pose just same as for trees
-            res = np.zeros((num_objs, 5+2*self.num_kpts))
-        else:
-            res = np.zeros((num_objs, 5))
+
+        res = np.zeros((num_objs, 5+2*self.num_kpts))
 
         for ix, obj in enumerate(objs):
             cls = self.class_ids.index(obj["category_id"])
             res[ix, 0:4] = obj["clean_bbox"] # put bbox data in res
             res[ix, 4] = cls                 # put the class ID in res
-            if self.human_pose:
-                res[ix, 5::2] = obj["clean_kpts"][0::3]
-                res[ix, 6::2] = obj["clean_kpts"][1::3]
+            res[ix, 5::2] = obj["clean_kpts"][0::3]
+            res[ix, 6::2] = obj["clean_kpts"][1::3]
 
         # r should be 1 since all images are 1280 x 720
         r = min(self.img_size[0] / height, self.img_size[1] / width)
         res[:, :4] *= r
-        if self.human_pose:
-            res[:, 5:] *= r
+        res[:, 5:] *= r
 
         img_info = (height, width)
         resized_info = (int(height * r), int(width * r))
@@ -183,11 +175,16 @@ class TREEKPTSDataset(Dataset):
     def load_resized_img(self, index):
         img = self.load_image(index)
         r = min(self.img_size[0] / img.shape[0], self.img_size[1] / img.shape[1])
-        resized_img = cv2.resize(
-            img,
-            (int(img.shape[1] * r), int(img.shape[0] * r)),
-            interpolation=cv2.INTER_LINEAR,
-        ).astype(np.uint8)
+        if r == 1:
+            # If the image is not already np.uint8, convert it; otherwise, use as is.
+            resized_img = img.astype(np.uint8) if img.dtype != np.uint8 else img
+        else:
+            # Proceed with resizing only if r != 1.
+            resized_img = cv2.resize(
+                img,
+                (int(img.shape[1] * r), int(img.shape[0] * r)),
+                interpolation=cv2.INTER_LINEAR,
+            ).astype(np.uint8)
         return resized_img
 
     def load_image(self, index):
