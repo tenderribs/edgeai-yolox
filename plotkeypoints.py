@@ -16,8 +16,14 @@ with open('./datasets/SynthTree43k/annotations/trees_val.json') as json_file:
 
     image_filename = os.path.join("./datasets/SynthTree43k", image['file_name'])
     cvimage = cv2.imread(image_filename)
-
     for tree in annotations:
+        bbox = tree['bbox']
+        x,y,w,h = int(bbox[0]), int(bbox[1]), int(bbox[2]), int(bbox[3])
+        p1 = (x,y)
+        p2 = (x + w, y + h)
+
+        cv2.rectangle(cvimage, p1, p2, (0,0,255), 2)
+
         kp = tree['keypoints']
         for idx in range(5):
             x = int(kp[0 + idx*3])
@@ -27,6 +33,7 @@ with open('./datasets/SynthTree43k/annotations/trees_val.json') as json_file:
             label_pos = (x - 40, y + 5)
 
             label = keypoint_names[idx]
+
             cv2.circle(cvimage, point, radius=3, color=(0, 255, 0), thickness=-1)
             cv2.putText(cvimage, label, label_pos, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
