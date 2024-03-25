@@ -2,7 +2,6 @@
 # -*- encoding: utf-8 -*-
 # Copyright (c) 2014-2021 Megvii Inc. All rights reserved.
 
-from yolox.models.yolo_object_pose_head import YOLOXObjectPoseHead
 import torch.nn as nn
 
 from .yolo_head import YOLOXHead
@@ -43,22 +42,6 @@ class YOLOX(nn.Module):
                     "l1_loss": l1_loss,
                     "conf_loss": conf_loss,
                     "cls_loss": cls_loss,
-                    "num_fg": num_fg,
-                }
-            elif isinstance(self.head, YOLOXObjectPoseHead):
-                loss, iou_loss, conf_loss, cls_loss, rot_loss, trn_xy_loss, trn_xyz_loss, l1_loss, adds_loss, num_fg = self.head(
-                    fpn_outs, targets, x
-                )
-                outputs = {
-                    "total_loss": loss,
-                    "iou_loss": iou_loss,
-                    "l1_loss": l1_loss,
-                    "conf_loss": conf_loss,
-                    "cls_loss": cls_loss,
-                    "rot_loss": rot_loss,
-                    "trn_xy_loss": trn_xy_loss,
-                    "trn_xyz_loss": trn_xyz_loss,
-                    "adds_loss": adds_loss,
                     "num_fg": num_fg,
                 }
             elif isinstance(self.head, YOLOXHeadKPTS):

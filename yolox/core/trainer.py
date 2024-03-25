@@ -30,7 +30,6 @@ from yolox.utils import (
     save_checkpoint,
     setup_logger,
     synchronize,
-    plots
 )
 
 
@@ -50,7 +49,6 @@ class Trainer:
         self.local_rank = get_local_rank()
         self.device = (exp.device_type if exp.device_type == "cpu" else "{}:{}".format(exp.device_type, self.local_rank))
         self.use_model_ema = exp.ema
-        self.state_dict_object_detect = None
 
         # data/dataloader related attr
         self.data_type = torch.float16 if args.fp16 else torch.float32
@@ -63,15 +61,6 @@ class Trainer:
 
         if self.rank == 0:
             os.makedirs(self.file_name, exist_ok=True)
-
-        if exp.object_pose and args.od_weights is not None:
-            file_name = os.path.basename(os.path.normpath(args.od_weights))
-            if '.ckpt' or '.pth' in file_name:
-                ckpt = torch.load(args.od_weights, map_location=self.device)
-                self.state_dict_object_detect = ckpt["model"]
-
-            else:
-                self.state_dict_object_detect = torch.load(args.od_weights, map_location=self.device)
 
         setup_logger(
             self.file_name,
@@ -110,14 +99,7 @@ class Trainer:
         targets.requires_grad = False
         inps, targets = self.exp.preprocess(inps, targets, self.input_size)
         data_end_time = time.time()
-        if self.epoch < 2 and self.iter <100 and (self.args.task == "human_pose" or self.args.task == "object_pose") and self.exp.visualize:
-            human_pose = self.args.task=="human_pose"
-            object_pose = self.args.task=="object_pose"
-            f = os.path.join(self.file_name, f'epoch_{self.epoch}_train_batch{self.iter}.png')  # filename
-            if not object_pose:
-                plots.plot_images(inps, targets, fname=f, human_pose=human_pose, object_pose=object_pose)
-            else:
-                plots.plot_images(inps, targets, fname=f, human_pose=human_pose, object_pose=object_pose, dataset=self.train_loader.dataset._dataset, data_index=data_index)
+
         if self.exp.device_type == "cpu":
             outputs = self.model(inps, targets)
         else:
@@ -137,15 +119,6 @@ class Trainer:
         lr = self.lr_scheduler.update_lr(self.progress_in_iter + 1)
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = lr
-
-        if self.state_dict_object_detect is not None:
-            state_dict_object_pose = self.model.state_dict()
-
-            for key in self.state_dict_object_detect.keys():
-                state_dict_object_pose[key] = self.state_dict_object_detect[key]
-                state_dict_object_pose[key].requires_grad = False
-
-            self.model.load_state_dict(state_dict_object_pose, strict=False)
 
         iter_end_time = time.time()
         self.meter.update(
@@ -204,22 +177,12 @@ class Trainer:
         self.model = model
         self.model.train()
 
-        if self.state_dict_object_detect is not None:
-            state_dict_object_pose = self.model.state_dict()
-
-            for key in self.state_dict_object_detect.keys():
-                state_dict_object_pose[key] = self.state_dict_object_detect[key]
-                state_dict_object_pose[key].requires_grad = False
-
-            self.model.load_state_dict(state_dict_object_pose, strict=False)
-            logger.warning("GRADIENTS FOR ALL 2DOD LAYERS HAVE BEEN DISABLED!")
-
         self.evaluator = self.exp.get_evaluator(
             batch_size=self.args.batch_size, is_distributed=self.is_distributed
         )
         # Tensorboard logger
-        if self.rank == 0:
-            self.tblogger = SummaryWriter(self.file_name)
+        # if self.rank == 0:
+            # self.tblogger = SummaryWriter(self.file_name)
 
         logger.info("Training start...")
         logger.info("\n{}".format(model))
@@ -265,9 +228,6 @@ class Trainer:
                 self.save_ckpt(ckpt_name="last_mosaic_epoch")
 
     def after_epoch(self):
-        date_time = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        self.save_ckpt(ckpt_name=f"{self.exp.exp_name}_{date_time}")
-
         if (self.epoch + 1) % self.exp.eval_interval == 0:
             all_reduce_norm(self.model)
             self.evaluate_and_save_model()
@@ -323,13 +283,6 @@ class Trainer:
 
             self.meter.clear_meters()
 
-
-        # random resizing
-        # if (self.progress_in_iter + 1) % 10 == 0 and not self.exp.object_pose:
-        #     self.input_size = self.exp.random_resize(
-        #         self.train_loader, self.epoch, self.rank, self.is_distributed,
-        #     )
-
     @property
     def progress_in_iter(self):
         return self.epoch * self.max_iter + self.iter
@@ -380,14 +333,7 @@ class Trainer:
             evalmodel, self.evaluator, self.is_distributed
         )
         self.model.train()
-        if self.state_dict_object_detect is not None:
-            state_dict_object_pose = self.model.state_dict()
 
-            for key in self.state_dict_object_detect.keys():
-                state_dict_object_pose[key] = self.state_dict_object_detect[key]
-                state_dict_object_pose[key].requires_grad = False
-
-            self.model.load_state_dict(state_dict_object_pose, strict=False)
         if self.rank == 0:
             self.tblogger.add_scalar("val/COCOAP50", ap50, self.epoch + 1)
             self.tblogger.add_scalar("val/COCOAP50_95", ap50_95, self.epoch + 1)
