@@ -12,7 +12,6 @@ import time
 import onnxruntime
 
 from yolox.data.data_augment import preproc as preprocess
-from yolox.data.datasets import COCO_CLASSES
 from yolox.utils import mkdir, vis, multiclass_nms
 
 
