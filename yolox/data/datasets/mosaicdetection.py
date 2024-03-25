@@ -13,7 +13,6 @@ from ..data_augment import random_affine
 from .datasets_wrapper import Dataset
 
 def get_mosaic_coordinate(mosaic_image, mosaic_index, xc, yc, w, h, input_h, input_w):
-    # TODO update doc
     # index0 to top left part of image
     if mosaic_index == 0:
         x1, y1, x2, y2 = max(xc - w, 0), max(yc - h, 0), xc, yc
@@ -86,17 +85,19 @@ class MosaicDetection(Dataset):
             input_dim = self._dataset.input_dim
             input_h, input_w = input_dim[0], input_dim[1]
 
+            # randomly select a center point between 0.5wh and 1.5wh, around which the images will be centered
             # yc, xc = s, s  # mosaic center x, y
             yc = int(random.uniform(0.5 * input_h, 1.5 * input_h))
             xc = int(random.uniform(0.5 * input_w, 1.5 * input_w))
 
-            # 3 additional image indices
+            # select 3 additional random image indices (need 4 for mosaic)
             indices = [idx] + [random.randint(0, len(self._dataset) - 1) for _ in range(3)]
 
             for i_mosaic, index in enumerate(indices):
                 # directly call pull_item, bypassing the __getitem__ of dataset with traintransform preproc
                 img, _labels, _, img_id = self._dataset.pull_item(index)
                 h0, w0 = img.shape[:2]  # orig hw
+
                 scale = min(1. * input_h / h0, 1. * input_w / w0)
                 img = cv2.resize(
                     img, (int(w0 * scale), int(h0 * scale)), interpolation=cv2.INTER_LINEAR
@@ -125,6 +126,7 @@ class MosaicDetection(Dataset):
                     labels[:, 6::2][labels[:, 6::2]!=0] = scale * _labels[:, 6::2][labels[:, 6::2]!=0] + padh
                 mosaic_labels.append(labels)
 
+            # concat all labels in a single array
             if len(mosaic_labels):
                 mosaic_labels = np.concatenate(mosaic_labels, 0)
                 np.clip(mosaic_labels[:, 0], 0, 2 * input_w, out=mosaic_labels[:, 0])
@@ -137,13 +139,13 @@ class MosaicDetection(Dataset):
             mosaic_img, mosaic_labels = random_affine(
                 mosaic_img,
                 mosaic_labels,
-                target_size=(input_w, input_h),
+                target_size=(input_w, input_h), # in data_augment transforms, by convention width then height
                 degrees=self.degrees,
                 translate=self.translate,
                 scales=self.scale,
                 shear=self.shear,
                 num_kpts=self.num_kpts
-            )  # border to remove
+            )
 
             # -----------------------------------------------------------------
             # CopyPaste: https://arxiv.org/abs/2012.07177
