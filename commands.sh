@@ -10,7 +10,6 @@ python3 -m yolox.tools.train -n yolox_s_tree_pose -b 32 --fp16 --occupy --worker
 python3 tools/export_onnx.py \
     --output-name pretrained_models/yolox_s_tree_pose.onnx \
     -f exps/default/yolox_s_tree_pose.py \
-    --export-det \
     -c YOLOX_outputs/yolox_s_tree_pose/best_ckpt.pth
 
 # run inference
