@@ -236,7 +236,6 @@ class TrainTransform:
 
         height, width, _ = image_t.shape
         image_t, r_ = preproc(image_t, input_dim)
-        assert r_ == 1 # would be surprised if not 1
 
         # resize boxes and keypoints after preprocessing image
         boxes = xyxy2cxcywh(boxes)
