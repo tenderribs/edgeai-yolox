@@ -37,8 +37,9 @@ class Exp(MyExp):
         self.num_kpts = 5
         self.act = "relu"
         self.default_sigmas = False # refers the the sigmas used in OKS formula
-        self.input_size = (384, 672)    # (height, width)
-        # self.input_size = (480, 640)  # (height, width)
+        # self.input_size = (384, 672)    # (height, width)
+        # promote more efficient downsampling w/720x1280 input
+        self.input_size = (352, 640)  # (height, width)
         # ---------------- dataloader config ---------------- #
 
         # --------------- transform config ----------------- #
@@ -124,8 +125,6 @@ class Exp(MyExp):
                 max_labels=120,
                 flip_prob=self.flip_prob,
                 hsv_prob=self.hsv_prob,
-                object_pose=self.object_pose,
-                human_pose=self.human_pose,
                 flip_index=dataset.flip_index,
                 num_kpts=self.num_kpts,
             ),
@@ -174,7 +173,6 @@ class Exp(MyExp):
             num_kpts=self.num_kpts,
             img_size=self.test_size,
             preproc=ValTransform(legacy=legacy),
-            human_pose = self.human_pose
         )
 
         if is_distributed:
@@ -200,8 +198,7 @@ class Exp(MyExp):
 
         val_loader = self.get_eval_loader(batch_size, is_distributed, testdev, legacy)
         output_dir = os.path.join(self.output_dir, self.exp_name)
-        if self.human_pose:
-            evaluator = COCOHumanPoseEvaluator(
+        return COCOHumanPoseEvaluator(
                 dataloader=val_loader,
                 img_size=self.test_size,
                 confthre=self.test_conf,
@@ -215,4 +212,3 @@ class Exp(MyExp):
                 default_sigmas=self.default_sigmas,
                 device_type=self.device_type
             )
-        return evaluator
