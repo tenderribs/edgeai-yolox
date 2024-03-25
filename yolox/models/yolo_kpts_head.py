@@ -40,7 +40,6 @@ class YOLOXHeadKPTS(nn.Module):
         self.kpt_index = []
         [self.kpt_index.extend((3 * i, 3 * i + 1)) for i in range(num_kpts)]
         self.decode_in_inference = True  # for deploy, set to False
-        self.export_proto = False
 
         self.cls_convs = nn.ModuleList()
         self.reg_convs = nn.ModuleList()
@@ -237,8 +236,6 @@ class YOLOXHeadKPTS(nn.Module):
                     )
                     kpts_output = kpts_output[..., self.kpt_index]
                     origin_kpts_preds.append(kpts_output.clone())
-
-
             else:
                 output = torch.cat(
                     [reg_output, obj_output, cls_output, kpts_output], 1
@@ -259,8 +256,6 @@ class YOLOXHeadKPTS(nn.Module):
                 origin_kpts_preds,
                 dtype=xin[0].dtype,
             )
-        elif self.export_proto:
-            return outputs
         else:
             self.hw = [x.shape[-2:] for x in outputs]
             # [batch, n_anchors_all, 85]
@@ -294,7 +289,7 @@ class YOLOXHeadKPTS(nn.Module):
         output[..., :2] = (output[..., :2] + grid) * stride
         output[..., 2:4] = torch.exp(output[..., 2:4]) * stride
         #output[..., 6:] = (output[..., 6:] +  kpt_grids.repeat(1,1,self.num_kpts)) * stride
-        output[..., 6:] = (2*output[..., 6:] -0.5 +  kpt_grids.repeat(1,1,self.num_kpts)) * stride
+        output[..., 6:] = (2*output[..., 6:] - 0.5 +  kpt_grids.repeat(1,1,self.num_kpts)) * stride
         return output, grid
 
     def decode_outputs(self, outputs, dtype):
@@ -314,8 +309,15 @@ class YOLOXHeadKPTS(nn.Module):
 
         outputs[..., :2] = (outputs[..., :2] + grids) * strides
         outputs[..., 2:4] = torch.exp(outputs[..., 2:4]) * strides
-        #outputs[...,  6:] = (outputs[..., 6:] + kpt_grids.repeat(1,1,self.num_kpts)) * strides
-        outputs[...,  6:] = (2*outputs[..., 6:] - 0.5  + kpt_grids.repeat(1,1,self.num_kpts)) * strides
+
+        # In the network forward pass, we learn the keypoints loss relative to the scaling 2 * outputs - 0.5
+        # the logic is explained here: https://github.com/ultralytics/yolov5/issues/1585#issuecomment-739060912
+        #
+        # TL;DR: factor 2 gives more range to sigmoid output, -0.5 centers output range around 0.5
+        outputs[..., 6:] = (2*outputs[..., 6:] - 0.5  + kpt_grids.repeat(1,1,self.num_kpts)) * strides
+
+        # convert kpts confidence score to probability
+        outputs[..., 8::3] = torch.sigmoid(outputs[..., 8::3])
         return outputs
 
     def get_losses(
@@ -333,7 +335,7 @@ class YOLOXHeadKPTS(nn.Module):
         bbox_preds = outputs[:, :, :4]  # [batch, n_anchors_all, 4]
         obj_preds = outputs[:, :, 4].unsqueeze(-1)  # [batch, n_anchors_all, 1]
         cls_preds = outputs[:, :, 5 : 5+self.num_classes]  # [batch, n_anchors_all, n_cls]
-        kpts_preds = outputs[:, :, 5+self.num_classes:]
+        kpts_preds = outputs[:, :, 5+self.num_classes:] # [batch, n_anchors_all, n_kpts * 3]
 
         # calculate targets
         mixup = labels.shape[2] > 5
@@ -757,21 +759,27 @@ class YOLOXHeadKPTS(nn.Module):
         ]
         return num_fg, gt_matched_classes, pred_ious_this_matching, matched_gt_inds
 
-
     def kpts_loss(self, kpts_preds, kpts_targets, bbox_targets):
         sigmas = self.sigmas.to(device=kpts_preds.device)
+
+        # preds are in format [x,y,conf] * num_kpts, targs as [x,y] * num_kpts
         kpts_preds_x, kpts_targets_x = kpts_preds[:, 0::3], kpts_targets[:, 0::2]
         kpts_preds_y, kpts_targets_y = kpts_preds[:, 1::3], kpts_targets[:, 1::2]
         kpts_preds_score = kpts_preds[:, 2::3]
-        # mask
+
+        # mask of visible kpts
         kpt_mask = (kpts_targets[:, 0::2] != 0)
+
+        # calculate visibility loss (l_{kpts_conf} in paper) based on binary cross entropy
+        # using ground truth visibility as ground truth
         lkptv = self.bcewithlog_loss(kpts_preds_score, kpt_mask.float()).mean(axis=1)
-        # OKS based loss
+
+        # OKS based loss:
         d = (kpts_preds_x - kpts_targets_x) ** 2 + (kpts_preds_y - kpts_targets_y) ** 2
-        bbox_scale = torch.prod(bbox_targets[:, -2:], dim=1, keepdim=True)  #scale derived from bbox gt
+        # scale derived from bbox gt area (w * h)
+        bbox_scale = torch.prod(bbox_targets[:, -2:], dim=1, keepdim=True)
         kpt_loss_factor = (torch.sum(kpt_mask != 0) + torch.sum(kpt_mask == 0)) / torch.sum(kpt_mask != 0)
-        oks = torch.exp(-d / (bbox_scale * (4 * sigmas**2) + 1e-9))
+        oks = torch.exp(-d / (bbox_scale * (4 * sigmas**2) + 1e-9)) # there is a missing minus in the paper
         lkpt = kpt_loss_factor * ((1 - oks) * kpt_mask).mean(axis=1)
 
         return lkpt, lkptv
-
