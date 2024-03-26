@@ -74,6 +74,12 @@ def make_parser():
         help="weights for trained 2DOD network"
     )
     parser.add_argument(
+        "--max-epoch",
+        default=100,
+        type=int,
+        help="train for x epochs",
+    )
+    parser.add_argument(
         "-e",
         "--start_epoch",
         default=None,
@@ -140,6 +146,8 @@ def main(exp, args):
         exp.train_ann = ds['train_ann']
         exp.test_ann = ds['test_ann']
         exp.val_ann = ds['val_ann']
+
+    if args.max_epoch: exp.max_epoch = args.max_epoch
 
     trainer = Trainer(exp, args)
     trainer.train()
